@@ -1,0 +1,888 @@
+<!DOCTYPE html>
+<html lang="hi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>3D Endless Runner - Lower Camera Angle</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #70c5e8;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            user-select: none;
+        }
+        #ui {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            color: #FFF;
+            font-size: 22px;
+            font-weight: 900;
+            text-shadow: 2px 3px 0px #000, -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000;
+            z-index: 10;
+            background: rgba(255, 153, 0, 0.85);
+            padding: 10px 22px;
+            border-radius: 30px;
+            backdrop-filter: blur(5px);
+            border: 3px solid #FFF;
+            box-shadow: 0 8px 15px rgba(0,0,0,0.3);
+            display: none;
+        }
+        #start-screen {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.75);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            z-index: 40;
+            backdrop-filter: blur(4px);
+        }
+        #start-screen h1 {
+            color: #FFD700;
+            font-size: 42px;
+            font-weight: 900;
+            text-shadow: 3px 3px 0px #000;
+            margin-bottom: 20px;
+            text-align: center;
+        }
+        #start-btn {
+            padding: 16px 45px;
+            font-size: 26px;
+            font-weight: 900;
+            background: linear-gradient(45deg, #FF416C, #FF4B2B);
+            color: white;
+            border: 4px solid #FFF;
+            border-radius: 40px;
+            cursor: pointer;
+            box-shadow: 0 8px 0px #880000, 0 15px 25px rgba(0,0,0,0.5);
+            transition: transform 0.1s;
+        }
+        #start-btn:active {
+            transform: translateY(4px);
+            box-shadow: 0 4px 0px #880000;
+        }
+        #loading {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: #FFD700;
+            font-size: 28px;
+            font-weight: 900;
+            z-index: 30;
+            text-shadow: 3px 3px 0px #000;
+            text-align: center;
+            width: 80%;
+        }
+        #game-over {
+            display: none;
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(255, 255, 255, 0.95);
+            color: #2c3e50;
+            padding: 40px;
+            border-radius: 25px;
+            text-align: center;
+            z-index: 20;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+            border: 4px solid #ff4757;
+            min-width: 280px;
+        }
+        #game-over h1 {
+            color: #ff4757;
+            margin-top: 0;
+            font-size: 40px;
+            font-weight: 900;
+            text-shadow: 2px 2px 0px #000;
+        }
+        #game-over button {
+            padding: 14px 35px;
+            font-size: 22px;
+            font-weight: 900;
+            background: linear-gradient(45deg, #2ed573, #1e90ff);
+            color: white;
+            border: 3px solid #FFF;
+            border-radius: 35px;
+            cursor: pointer;
+            margin-top: 20px;
+            box-shadow: 0 6px 0px #130f40;
+            transition: transform 0.1s;
+        }
+        #game-over button:active {
+            transform: translateY(4px);
+            box-shadow: 0 2px 0px #130f40;
+        }
+    </style>
+</head>
+<body>
+
+    <audio id="bgm" src="MUSIC.mp3" loop preload="auto"></audio>
+    <audio id="duckSound" src="duck.mp3" preload="auto"></audio>
+
+    <div id="ui">
+        SCORE: <span id="score">0</span> | 🪙 COINS: <span id="coins">0</span>
+    </div>
+
+    <div id="loading">🎮 Loading Subway World...</div>
+
+    <div id="start-screen" style="display: none;">
+        <h1>3D SUBWAY RUNNER</h1>
+        <button id="start-btn" onclick="onStartClick()">TAP TO START</button>
+    </div>
+
+    <div id="game-over">
+        <h1>GAME OVER</h1>
+        <p id="final-score" style="font-size: 22px; font-weight: bold;">Score: 0</p>
+        <button onclick="restartGame()">PLAY AGAIN</button>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+
+    <script>
+        let scene, camera, renderer, loader;
+        let playerGroup, playerModel, trainTemplateModel, barrierTemplateModel, buildingTemplateModel, mixer, runAction;
+
+        let leftLeg, rightLeg, leftArm, rightArm;
+        let useProceduralAnim = false;
+
+        const lanes = [-3.2, 0, 3.2];
+        let currentLane = 1;
+        let targetX = lanes[currentLane];
+
+        let score = 0, coins = 0;
+        
+        const BASE_MOVE_SPEED = 0; 
+        const PLAYER_RUN_SPEED = 1.50; 
+        let trainSpeedMultiplier = 3.5; 
+
+        const TRACK_SURFACE_Y = 0.22; 
+
+        let isJumping = false;
+        let jumpVelocity = 0;
+        const initialJumpPower = 0.55;
+        const upGravity = -0.09;
+        const downGravity = -0.06;
+
+        let isCrouching = false;
+        let crouchTimer = 0;
+
+        let gameStarted = false;
+        let gameOver = false;
+        let isModelLoaded = false;
+        let elapsedTimeCounter = 0;
+
+        let obstacles = [];
+        let barriers = [];
+        let coinObjects = [];
+        let trackTies = [];
+        let buildingObjects = [];
+
+        let animStep = 0;
+
+        let trainHalfLength = 21.0; 
+        let trainHalfWidth = 1.2;   
+        let trainHeight = 3.8;
+
+        const runnerModelUrl = 'RUNNER.GLB';
+        const trainModelUrl = 'TRAINS.glb';
+        const buildingModelUrl = 'BUILDINGS.glb';
+
+        const bgmAudio = document.getElementById('bgm');
+        const duckAudio = document.getElementById('duckSound');
+        bgmAudio.volume = 0.35;
+
+        function startBackgroundMusic() {
+            if (!gameOver && gameStarted) {
+                bgmAudio.play().catch(e => console.log("Audio play blocked by browser:", e));
+            }
+        }
+
+        function stopBackgroundMusic() {
+            bgmAudio.pause();
+        }
+
+        document.addEventListener('visibilitychange', () => {
+            if (document.hidden) {
+                stopBackgroundMusic();
+            } else if (gameStarted && !gameOver) {
+                startBackgroundMusic();
+            }
+        });
+
+        window.addEventListener('blur', stopBackgroundMusic);
+        window.addEventListener('pagehide', stopBackgroundMusic);
+        window.addEventListener('focus', () => {
+            if (gameStarted && !gameOver) {
+                startBackgroundMusic();
+            }
+        });
+
+        function playCrouchSound() {
+            if (duckAudio) {
+                duckAudio.currentTime = 0;
+                duckAudio.play().catch(e => console.log("Duck sound error:", e));
+            }
+        }
+
+        let audioCtx;
+        function initAudioContext() {
+            if (!audioCtx) {
+                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            }
+            if (audioCtx.state === 'suspended') {
+                audioCtx.resume();
+            }
+        }
+
+        function playJumpSound() {
+            if (!audioCtx) return;
+            const now = audioCtx.currentTime;
+            let osc = audioCtx.createOscillator();
+            let gain = audioCtx.createGain();
+            osc.type = 'sine';
+            osc.frequency.setValueAtTime(250, now);
+            osc.frequency.exponentialRampToValueAtTime(1200, now + 0.16);
+            gain.gain.setValueAtTime(0.2, now);
+            gain.gain.exponentialRampToValueAtTime(0.001, now + 0.16);
+            osc.connect(gain);
+            gain.connect(audioCtx.destination);
+            osc.start(now);
+            osc.stop(now + 0.16);
+        }
+
+        function playCoinSound() {
+            if (!audioCtx) return;
+            const now = audioCtx.currentTime;
+            [1318.51, 1661.22, 1975.53].forEach((freq, idx) => {
+                let osc = audioCtx.createOscillator();
+                let gain = audioCtx.createGain();
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(freq, now + idx * 0.03);
+                gain.gain.setValueAtTime(0.12, now + idx * 0.03);
+                gain.gain.exponentialRampToValueAtTime(0.001, now + idx * 0.03 + 0.18);
+                osc.connect(gain);
+                gain.connect(audioCtx.destination);
+                osc.start(now + idx * 0.03);
+                osc.stop(now + idx * 0.03 + 0.18);
+            });
+        }
+
+        function playGameOverSound() {
+            stopBackgroundMusic();
+            if (!audioCtx) return;
+            const now = audioCtx.currentTime;
+
+            let noiseBuffer = audioCtx.createBuffer(1, audioCtx.sampleRate * 0.6, audioCtx.sampleRate);
+            let output = noiseBuffer.getChannelData(0);
+            for (let i = 0; i < noiseBuffer.length; i++) {
+                output[i] = Math.random() * 2 - 1;
+            }
+            let whiteNoise = audioCtx.createBufferSource();
+            whiteNoise.buffer = noiseBuffer;
+
+            let filter = audioCtx.createBiquadFilter();
+            filter.type = 'lowpass';
+            filter.frequency.setValueAtTime(400, now);
+            filter.frequency.exponentialRampToValueAtTime(50, now + 0.6);
+
+            let noiseGain = audioCtx.createGain();
+            noiseGain.gain.setValueAtTime(0.5, now);
+            noiseGain.gain.exponentialRampToValueAtTime(0.001, now + 0.6);
+
+            whiteNoise.connect(filter);
+            filter.connect(noiseGain);
+            noiseGain.connect(audioCtx.destination);
+            whiteNoise.start(now);
+            whiteNoise.stop(now + 0.6);
+
+            const epicNotes = [
+                { f: 220.00, t: 0.0, d: 0.25 }, 
+                { f: 196.00, t: 0.15, d: 0.25 }, 
+                { f: 164.81, t: 0.30, d: 0.30 }, 
+                { f: 110.00, t: 0.50, d: 0.80 }  
+            ];
+
+            epicNotes.forEach(note => {
+                let osc = audioCtx.createOscillator();
+                let osc2 = audioCtx.createOscillator();
+                let gain = audioCtx.createGain();
+
+                osc.type = 'sawtooth';
+                osc2.type = 'triangle';
+
+                osc.frequency.setValueAtTime(note.f, now + note.t);
+                osc2.frequency.setValueAtTime(note.f * 0.5, now + note.t); 
+
+                gain.gain.setValueAtTime(0.35, now + note.t);
+                gain.gain.exponentialRampToValueAtTime(0.001, now + note.t + note.d);
+
+                osc.connect(gain);
+                osc2.connect(gain);
+                gain.connect(audioCtx.destination);
+
+                osc.start(now + note.t);
+                osc2.start(now + note.t);
+                osc.stop(now + note.t + note.d);
+                osc2.stop(now + note.t + note.d);
+            });
+        }
+
+        function init() {
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x70c5e8);
+            scene.fog = new THREE.FogExp2(0x87ceeb, 0.005);
+
+            // Camera position made lower (Y: 2.8, Z: 6.2) for a cinematic down angle
+            camera = new THREE.PerspectiveCamera(65, window.innerWidth / window.innerHeight, 0.1, 500);
+            camera.position.set(0, 2.8, 6.2);
+            camera.lookAt(0, 1.2, -10);
+
+            renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: "high-performance" });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(1.0); 
+            renderer.shadowMap.enabled = false; 
+            document.body.appendChild(renderer.domElement);
+
+            const ambientLight = new THREE.AmbientLight(0xffffff, 1.4);
+            scene.add(ambientLight);
+
+            const dirLight = new THREE.DirectionalLight(0xfffaed, 1.2);
+            dirLight.position.set(15, 30, 15);
+            scene.add(dirLight);
+
+            createTracksAndEnvironment();
+            barrierTemplateModel = createBarrierModel();
+
+            loader = new THREE.GLTFLoader();
+            loadBuildingModel();
+
+            window.addEventListener('keydown', handleKeyDown);
+            setupTouchControls();
+            window.addEventListener('resize', onWindowResize);
+        }
+
+        function createBarrierModel() {
+            const barrierGroup = new THREE.Group();
+            const poleMat = new THREE.MeshStandardMaterial({ color: 0x34495e, roughness: 0.5 });
+            const poleGeo = new THREE.CylinderGeometry(0.09, 0.09, 1.4, 8);
+            
+            const leftPole = new THREE.Mesh(poleGeo, poleMat);
+            leftPole.position.set(-1.25, 0.7 + TRACK_SURFACE_Y, 0);
+            barrierGroup.add(leftPole);
+
+            const rightPole = new THREE.Mesh(poleGeo, poleMat);
+            rightPole.position.set(1.25, 0.7 + TRACK_SURFACE_Y, 0);
+            barrierGroup.add(rightPole);
+
+            const barGeo = new THREE.BoxGeometry(2.8, 0.45, 0.35);
+            const barMat = new THREE.MeshStandardMaterial({ color: 0xffcc00, roughness: 0.3 });
+            const mainBar = new THREE.Mesh(barGeo, barMat);
+            mainBar.position.set(0, 1.25 + TRACK_SURFACE_Y, 0);
+            barrierGroup.add(mainBar);
+
+            const stripeGeo = new THREE.BoxGeometry(0.35, 0.46, 0.37);
+            const stripeMat = new THREE.MeshBasicMaterial({ color: 0x222222 });
+
+            [-0.8, 0, 0.8].forEach(xOffset => {
+                const stripe = new THREE.Mesh(stripeGeo, stripeMat);
+                stripe.position.set(xOffset, 1.25 + TRACK_SURFACE_Y, 0);
+                barrierGroup.add(stripe);
+            });
+
+            return barrierGroup;
+        }
+
+        function loadBuildingModel() {
+            loader.load(buildingModelUrl, function (gltf) {
+                let rawBuilding = gltf.scene;
+
+                let box = new THREE.Box3().setFromObject(rawBuilding);
+                let center = new THREE.Vector3();
+                let size = new THREE.Vector3();
+                box.getCenter(center);
+                box.getSize(size);
+
+                let maxDim = Math.max(size.x, size.y, size.z);
+                let targetScale = 1.0;
+                if (maxDim > 0) {
+                    targetScale = 72.0 / maxDim; 
+                }
+                rawBuilding.scale.set(targetScale, targetScale, targetScale);
+
+                buildingTemplateModel = new THREE.Group();
+                rawBuilding.position.set(-center.x * targetScale, -box.min.y * targetScale, -center.z * targetScale);
+                buildingTemplateModel.add(rawBuilding);
+
+                loadAllModels();
+            }, undefined, function (err) {
+                console.log("BUILDINGS.glb load error, fallback active");
+                buildingTemplateModel = null;
+                loadAllModels();
+            });
+        }
+
+        function loadAllModels() {
+            loader.load(trainModelUrl, function (gltf) {
+                let rawTrain = gltf.scene;
+
+                let box = new THREE.Box3().setFromObject(rawTrain);
+                let center = new THREE.Vector3();
+                let size = new THREE.Vector3();
+                box.getCenter(center);
+                box.getSize(size);
+
+                let targetWidth = 2.4; 
+                let targetLength = 42.0;
+
+                let scaleX = targetWidth / (size.x || 1);
+                let scaleY = scaleX;
+                let scaleZ = targetLength / (size.z || 1);
+
+                rawTrain.scale.set(scaleX, scaleY, scaleZ);
+
+                trainTemplateModel = new THREE.Group();
+                rawTrain.position.x = -center.x * scaleX;
+                rawTrain.position.y = -box.min.y * scaleY + TRACK_SURFACE_Y; 
+                rawTrain.position.z = -center.z * scaleZ;
+                trainTemplateModel.add(rawTrain);
+
+                loadRunnerModel();
+            }, undefined, function (err) {
+                trainTemplateModel = createFallbackTrain();
+                loadRunnerModel();
+            });
+        }
+
+        function createFallbackTrain() {
+            const trainGroup = new THREE.Group();
+            const bodyGeo = new THREE.BoxGeometry(2.4, trainHeight, 42.0); 
+            const bodyMat = new THREE.MeshStandardMaterial({ color: 0xe74c3c, roughness: 0.4 });
+            const body = new THREE.Mesh(bodyGeo, bodyMat);
+            body.position.y = (trainHeight / 2) + TRACK_SURFACE_Y;
+            trainGroup.add(body);
+
+            const lightGeo = new THREE.BoxGeometry(0.8, 0.8, 0.2);
+            const lightMat = new THREE.MeshBasicMaterial({ color: 0xf1c40f });
+            const light = new THREE.Mesh(lightGeo, lightMat);
+            light.position.set(0, 2.4 + TRACK_SURFACE_Y, 21.01);
+            trainGroup.add(light);
+
+            return trainGroup;
+        }
+
+        function loadRunnerModel() {
+            loader.load(runnerModelUrl, function (gltf) {
+                playerGroup = new THREE.Group();
+                playerModel = gltf.scene;
+                
+                playerModel.scale.set(1.8, 1.8, 1.8);
+                playerModel.rotation.set(0, Math.PI, 0);
+
+                const box = new THREE.Box3().setFromObject(playerModel);
+                playerModel.position.y = -box.min.y; 
+
+                playerModel.traverse(child => {
+                    const n = child.name.toLowerCase();
+                    if (n.includes('leg') || n.includes('thigh') || n.includes('upleg') || n.includes('hip')) {
+                        if (n.includes('l') || n.includes('left')) leftLeg = child;
+                        else if (n.includes('r') || n.includes('right')) rightLeg = child;
+                    }
+                    if (n.includes('arm') || n.includes('shoulder')) {
+                        if (n.includes('l') || n.includes('left')) leftArm = child;
+                        else if (n.includes('r') || n.includes('right')) rightArm = child;
+                    }
+                });
+
+                playerGroup.add(playerModel);
+                playerGroup.position.set(lanes[currentLane], TRACK_SURFACE_Y, 0);
+                targetX = lanes[currentLane];
+                scene.add(playerGroup);
+
+                if (gltf.animations && gltf.animations.length > 0) {
+                    mixer = new THREE.AnimationMixer(playerModel);
+                    let clip = gltf.animations.find(a => a.name.toLowerCase().includes('run')) || gltf.animations[0];
+                    runAction = mixer.clipAction(clip);
+                    runAction.setLoop(THREE.LoopRepeat);
+                    runAction.play();
+                } else {
+                    useProceduralAnim = true;
+                }
+
+                showStartScreen();
+            }, undefined, function(err) {
+                console.error(err);
+                document.getElementById('loading').innerText = "❌ RUNNER.GLB load nahi ho saka!";
+            });
+        }
+
+        function showStartScreen() {
+            document.getElementById('loading').style.display = 'none';
+            document.getElementById('start-screen').style.display = 'flex';
+            isModelLoaded = true;
+            spawnInitialObjects();
+            renderer.render(scene, camera);
+        }
+
+        function onStartClick() {
+            initAudioContext();
+            document.getElementById('start-screen').style.display = 'none';
+            document.getElementById('ui').style.display = 'block';
+            gameStarted = true;
+            startBackgroundMusic();
+            animate();
+        }
+
+        function createTracksAndEnvironment() {
+            const groundGeo = new THREE.PlaneGeometry(12, 1000);
+            const groundMat = new THREE.MeshStandardMaterial({ color: 0x3a3d40, roughness: 0.95 }); 
+            const ground = new THREE.Mesh(groundGeo, groundMat);
+            ground.rotation.x = -Math.PI / 2;
+            ground.position.z = -450;
+            scene.add(ground);
+
+            const grassGeo = new THREE.PlaneGeometry(10, 1000);
+            const grassMat = new THREE.MeshBasicMaterial({ color: 0x27ae60 }); 
+
+            const leftGrass = new THREE.Mesh(grassGeo, grassMat);
+            leftGrass.rotation.x = -Math.PI / 2;
+            leftGrass.position.set(-11, 0.01, -450);
+            scene.add(leftGrass);
+
+            const rightGrass = new THREE.Mesh(grassGeo, grassMat);
+            rightGrass.rotation.x = -Math.PI / 2;
+            rightGrass.position.set(11, 0.01, -450);
+            scene.add(rightGrass);
+
+            lanes.forEach(xPos => {
+                for (let z = 10; z > -900; z -= 8.0) { 
+                    const tieGeo = new THREE.BoxGeometry(2.3, 0.12, 0.5);
+                    const tieMat = new THREE.MeshBasicMaterial({ color: 0x2c2c2c }); 
+                    const tie = new THREE.Mesh(tieGeo, tieMat);
+                    tie.position.set(xPos, 0.06, z);
+                    scene.add(tie);
+                    trackTies.push(tie);
+                }
+
+                [-0.85, 0.85].forEach(railOffset => {
+                    const railGeo = new THREE.BoxGeometry(0.14, 0.28, 1000);
+                    const railMat = new THREE.MeshStandardMaterial({ color: 0xcccccc, roughness: 0.2, metalness: 0.8 });
+                    const rail = new THREE.Mesh(railGeo, railMat);
+                    rail.position.set(xPos + railOffset, 0.22, -450);
+                    scene.add(rail);
+                });
+            });
+        }
+
+        function spawnInitialObjects() {
+            if (buildingTemplateModel) {
+                for (let z = 20; z > -900; z -= 30) {
+                    let bLeft = buildingTemplateModel.clone();
+                    bLeft.position.set(-12.5, 0, z);
+                    bLeft.rotation.y = Math.PI / 2;
+                    scene.add(bLeft);
+                    buildingObjects.push(bLeft);
+
+                    let bRight = buildingTemplateModel.clone();
+                    bRight.position.set(12.5, 0, z);
+                    bRight.rotation.y = -Math.PI / 2;
+                    scene.add(bRight);
+                    buildingObjects.push(bRight);
+                }
+            } else {
+                [-12.5, 12.5].forEach(wallX => {
+                    const wallGeo = new THREE.BoxGeometry(1.2, 56, 1000);
+                    const wallMat = new THREE.MeshStandardMaterial({ color: 0x8e44ad, roughness: 0.5 });
+                    const wall = new THREE.Mesh(wallGeo, wallMat);
+                    wall.position.set(wallX, 28, -450);
+                    scene.add(wall);
+
+                    const capGeo = new THREE.BoxGeometry(1.4, 0.8, 1000);
+                    const capMat = new THREE.MeshBasicMaterial({ color: 0xff7675 });
+                    const cap = new THREE.Mesh(capGeo, capMat);
+                    cap.position.set(wallX, 56.4, -450);
+                    scene.add(cap);
+                });
+            }
+
+            let startZ = -150;
+            for (let i = 0; i < 3; i++) {
+                let trainObj = trainTemplateModel.clone();
+                let laneIndex = i % 3;
+                trainObj.position.set(lanes[laneIndex], 0, startZ);
+                scene.add(trainObj);
+                obstacles.push(trainObj);
+                startZ -= 130; 
+            }
+
+            let bZ = -90;
+            for (let i = 0; i < 3; i++) {
+                let laneIndex = (i * 2) % 3;
+                let barrier = barrierTemplateModel.clone();
+                barrier.position.set(lanes[laneIndex], 0, bZ);
+                scene.add(barrier);
+                barriers.push(barrier);
+                bZ -= 140;
+            }
+
+            const coinGeo = new THREE.CylinderGeometry(0.45, 0.45, 0.12, 8);
+            const coinMat = new THREE.MeshStandardMaterial({ color: 0xffd700, roughness: 0.2 });
+
+            for (let z = -40; z > -800; z -= 35) {
+                let coinLane = Math.floor(Math.random() * 3);
+                for (let c = 0; c < 3; c++) {
+                    const coin = new THREE.Mesh(coinGeo, coinMat);
+                    coin.rotation.x = Math.PI / 2;
+                    coin.position.set(lanes[coinLane], 1.3 + TRACK_SURFACE_Y, z - (c * 2.2));
+                    scene.add(coin);
+                    coinObjects.push(coin);
+                }
+            }
+        }
+
+        function handleKeyDown(e) {
+            if (gameOver || !gameStarted) return;
+            if ((e.key === 'ArrowLeft' || e.key === 'a') && currentLane > 0) {
+                currentLane--;
+                targetX = lanes[currentLane];
+            }
+            if ((e.key === 'ArrowRight' || e.key === 'd') && currentLane < 2) {
+                currentLane++;
+                targetX = lanes[currentLane];
+            }
+            if ((e.key === 'ArrowUp' || e.key === 'w' || e.key === ' ') && !isJumping) {
+                isJumping = true;
+                jumpVelocity = initialJumpPower; 
+                playJumpSound();
+            }
+            if (e.key === 'ArrowDown' || e.key === 's') {
+                if (isJumping) {
+                    jumpVelocity = -0.9;
+                } else {
+                    triggerCrouch();
+                }
+            }
+        }
+
+        function triggerCrouch() {
+            if (isCrouching) return;
+            isCrouching = true;
+            crouchTimer = 0.5; 
+            playCrouchSound();
+        }
+
+        function setupTouchControls() {
+            let startX = 0, startY = 0;
+            window.addEventListener('touchstart', (e) => {
+                startX = e.touches[0].clientX;
+                startY = e.touches[0].clientY;
+            }, { passive: true });
+
+            window.addEventListener('touchend', (e) => {
+                if (gameOver || !gameStarted) return;
+                let diffX = e.changedTouches[0].clientX - startX;
+                let diffY = e.changedTouches[0].clientY - startY;
+
+                if (Math.abs(diffX) > Math.abs(diffY)) {
+                    if (diffX > 8 && currentLane < 2) {
+                        currentLane++;
+                        targetX = lanes[currentLane];
+                    }
+                    else if (diffX < -8 && currentLane > 0) {
+                        currentLane--;
+                        targetX = lanes[currentLane];
+                    }
+                } else {
+                    if (diffY < -8 && !isJumping) {
+                        isJumping = true;
+                        jumpVelocity = initialJumpPower; 
+                        playJumpSound();
+                    } else if (diffY > 8) {
+                        if (isJumping) {
+                            jumpVelocity = -0.9; 
+                        } else {
+                            triggerCrouch();
+                        }
+                    }
+                }
+            }, { passive: true });
+        }
+
+        function animate() {
+            if (gameOver || !gameStarted) return;
+            requestAnimationFrame(animate);
+
+            const delta = 0.016; 
+            elapsedTimeCounter += delta;
+
+            playerGroup.position.z -= PLAYER_RUN_SPEED;
+
+            let moveDiff = targetX - playerGroup.position.x;
+            playerGroup.position.x += moveDiff * 0.35; 
+            playerModel.rotation.z = -moveDiff * 0.12; 
+
+            // Camera follow position updated with lower height (Y: 2.8, Z: 6.2)
+            if (playerGroup) {
+                camera.position.x = playerGroup.position.x;
+                camera.position.y = 2.8 + (playerGroup.position.y - TRACK_SURFACE_Y) * 0.5;
+                camera.position.z = playerGroup.position.z + 6.2;
+                camera.lookAt(playerGroup.position.x, playerGroup.position.y + 1.2, playerGroup.position.z - 10);
+            }
+
+            let baseGroundY = TRACK_SURFACE_Y;
+
+            if (isJumping) {
+                if (runAction) runAction.paused = true; 
+                if (useProceduralAnim) {
+                    if (leftLeg) leftLeg.rotation.x = 0.3;
+                    if (rightLeg) rightLeg.rotation.x = -0.3;
+                }
+            } else if (isCrouching) {
+                crouchTimer -= delta;
+                if (runAction) runAction.paused = true; 
+
+                playerModel.rotation.x = -1.1; 
+                playerGroup.position.y = baseGroundY - 0.2; 
+
+                if (crouchTimer <= 0) {
+                    isCrouching = false;
+                    playerModel.rotation.x = 0; 
+                    playerGroup.position.y = baseGroundY;
+                }
+            } else {
+                playerModel.rotation.x = 0;
+                playerGroup.position.y = baseGroundY;
+
+                if (runAction) {
+                    if (!runAction.isRunning()) runAction.play(); 
+                    runAction.paused = false; 
+                    runAction.timeScale = 5.2; 
+                }
+
+                if (useProceduralAnim) {
+                    animStep += delta * 48.0; 
+                    if (leftLeg && rightLeg) {
+                        leftLeg.rotation.x = Math.sin(animStep) * 1.1; 
+                        rightLeg.rotation.x = -Math.sin(animStep) * 1.1;
+                    }
+                    if (leftArm && rightArm) {
+                        leftArm.rotation.x = -Math.sin(animStep) * 0.95; 
+                        rightArm.rotation.x = Math.sin(animStep) * 0.95;
+                    }
+                }
+            }
+
+            if (mixer && !isJumping && !isCrouching) {
+                mixer.update(delta);
+            }
+
+            if (isJumping) {
+                playerGroup.position.y += jumpVelocity;
+
+                if (jumpVelocity > 0) {
+                    jumpVelocity += upGravity; 
+                } else {
+                    jumpVelocity += downGravity; 
+                }
+
+                if (playerGroup.position.y <= baseGroundY) {
+                    playerGroup.position.y = baseGroundY;
+                    isJumping = false;
+                }
+            }
+
+            const stepMove = BASE_MOVE_SPEED; 
+
+            const playerX = playerGroup.position.x;
+            const playerZ = playerGroup.position.z;
+            const playerY = playerGroup.position.y;
+            const canCheckCollision = elapsedTimeCounter > 1.2;
+
+            for (let i = 0; i < obstacles.length; i++) {
+                let obs = obstacles[i];
+                obs.position.z += PLAYER_RUN_SPEED * trainSpeedMultiplier;
+
+                let trainX = obs.position.x;
+                let trainZ = obs.position.z;
+
+                let trainFrontZ = trainZ + trainHalfLength;
+                let trainBackZ = trainZ - trainHalfLength;
+
+                if (canCheckCollision && Math.abs(playerZ - trainZ) <= trainHalfLength) {
+                    let isInsideX = Math.abs(playerX - trainX) < trainHalfWidth;
+                    if (isInsideX) {
+                        endGame();
+                    }
+                }
+
+                if (trainBackZ > playerZ + 20) {
+                    let furthestZ = Math.min(...obstacles.map(o => o.position.z));
+                    let newZ = Math.min(playerZ - 200, furthestZ - 120 - Math.random() * 40);
+
+                    let nextLane = lanes[Math.floor(Math.random() * 3)];
+                    obs.position.set(nextLane, 0, newZ);
+                }
+            }
+
+            for (let i = 0; i < barriers.length; i++) {
+                let bar = barriers[i];
+
+                if (canCheckCollision && Math.abs(bar.position.z - playerZ) < 1.2 &&
+                    Math.abs(bar.position.x - playerX) < 1.1) {
+                    
+                    if (playerY >= (TRACK_SURFACE_Y - 0.1) && playerY <= (TRACK_SURFACE_Y + 1.2) && !isCrouching) {
+                        endGame();
+                    }
+                }
+            }
+
+            for (let i = 0; i < coinObjects.length; i++) {
+                let coin = coinObjects[i];
+                coin.rotation.z += 0.05;
+
+                if (Math.abs(coin.position.z - playerZ) < 1.4 &&
+                    Math.abs(coin.position.x - playerX) < 1.0 &&
+                    Math.abs(coin.position.y - playerY) < 2.5) {
+                    coins++;
+                    playCoinSound();
+                    document.getElementById('coins').innerText = coins;
+                    coin.position.z = playerZ - 300 - (i * 10);
+                    coin.position.x = lanes[i % 3];
+                }
+            }
+
+            score += 1;
+            document.getElementById('score').innerText = Math.floor(score / 5);
+
+            renderer.render(scene, camera);
+        }
+
+        function endGame() {
+            gameOver = true;
+            playGameOverSound();
+            document.getElementById('final-score').innerText = "Final Score: " + Math.floor(score / 5) + " | Coins: " + coins;
+            document.getElementById('game-over').style.display = 'block';
+        }
+
+        function restartGame() {
+            location.reload();
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        window.onload = init;
+    </script>
+</body>
+</html>
